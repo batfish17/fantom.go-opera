@@ -31,14 +31,14 @@ func (h *snapHandler) Chain() snap.BlockChain {
 
 // RunPeer is invoked when a peer joins on the `snap` protocol.
 func (h *snapHandler) RunPeer(peer *snap.Peer, hand snap.Handler) error {
-	return (*handler)(h).runSnapExtension(peer, hand)
+	return (*handler)(h).runsnapExtension(peer, hand)
 }
 
 // PeerInfo retrieves all known `snap` information about a peer.
 func (h *snapHandler) PeerInfo(id enode.ID) interface{} {
 	if p := h.peers.Peer(id.String()); p != nil {
-		if p.snapExt != nil {
-			return p.snapExt.info()
+		if p.SnapExt != nil {
+			return p.SnapExt.info()
 		}
 	}
 	return nil
@@ -54,7 +54,7 @@ func (h *snapHandler) Handle(peer *snap.Peer, packet snap.Packet) error {
 // starts handling inbound messages. As `snap` is only a satellite protocol to
 // `eth`, all subsystem registrations and lifecycle management will be done by
 // the main `eth` handler to prevent strange races.
-func (h *handler) runSnapExtension(peer *snap.Peer, handler snap.Handler) error {
+func (h *handler) runsnapExtension(peer *snap.Peer, handler snap.Handler) error {
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 	if err := h.peers.RegisterSnapExtension(peer); err != nil {

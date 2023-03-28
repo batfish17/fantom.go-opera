@@ -240,8 +240,8 @@ func (c *Config) Validate() error {
 	if defaultChunkSize.Num > hardLimitItems-1 {
 		return fmt.Errorf("DefaultChunkSize.Num has to be at not greater than %d", hardLimitItems-1)
 	}
-	if defaultChunkSize.Size > protocolMaxMsgSize/2 {
-		return fmt.Errorf("DefaultChunkSize.Num has to be at not greater than %d", protocolMaxMsgSize/2)
+	if defaultChunkSize.Size > ProtocolMaxMsgSize/2 {
+		return fmt.Errorf("DefaultChunkSize.Num has to be at not greater than %d", ProtocolMaxMsgSize/2)
 	}
 	if p.EventsSemaphoreLimit.Num < 2*defaultChunkSize.Num ||
 		p.EventsSemaphoreLimit.Size < 2*defaultChunkSize.Size {
@@ -251,14 +251,14 @@ func (c *Config) Validate() error {
 		p.EventsSemaphoreLimit.Size < 2*p.DagProcessor.EventsBufferLimit.Size {
 		return fmt.Errorf("EventsSemaphoreLimit has to be at least 2 times greater than %s (EventsBufferLimit)", p.DagProcessor.EventsBufferLimit.String())
 	}
-	if p.EventsSemaphoreLimit.Size < 2*protocolMaxMsgSize {
-		return fmt.Errorf("EventsSemaphoreLimit.Size has to be at least %d", 2*protocolMaxMsgSize)
+	if p.EventsSemaphoreLimit.Size < 2*ProtocolMaxMsgSize {
+		return fmt.Errorf("EventsSemaphoreLimit.Size has to be at least %d", 2*ProtocolMaxMsgSize)
 	}
-	if p.MsgsSemaphoreLimit.Size < protocolMaxMsgSize {
-		return fmt.Errorf("MsgsSemaphoreLimit.Size has to be at least %d", protocolMaxMsgSize)
+	if p.MsgsSemaphoreLimit.Size < ProtocolMaxMsgSize {
+		return fmt.Errorf("MsgsSemaphoreLimit.Size has to be at least %d", ProtocolMaxMsgSize)
 	}
-	if p.DagProcessor.EventsBufferLimit.Size < protocolMaxMsgSize {
-		return fmt.Errorf("EventsBufferLimit.Size has to be at least %d", protocolMaxMsgSize)
+	if p.DagProcessor.EventsBufferLimit.Size < ProtocolMaxMsgSize {
+		return fmt.Errorf("EventsBufferLimit.Size has to be at least %d", ProtocolMaxMsgSize)
 	}
 
 	return nil
@@ -293,6 +293,6 @@ func DefaultPeerCacheConfig(scale cachescale.Func) PeerCacheConfig {
 		MaxKnownTxs:    24576*3/4 + scale.I(24576/4),
 		MaxKnownEvents: 24576*3/4 + scale.I(24576/4),
 		MaxQueuedItems: 4096*3/4 + scale.Events(4096/4),
-		MaxQueuedSize:  protocolMaxMsgSize*3/4 + 1024 + scale.U64(protocolMaxMsgSize/4),
+		MaxQueuedSize:  ProtocolMaxMsgSize*3/4 + 1024 + scale.U64(ProtocolMaxMsgSize/4),
 	}
 }

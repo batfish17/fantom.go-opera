@@ -68,12 +68,12 @@ func (ss *syncStatus) RequestLLR() bool {
 }
 
 type txsync struct {
-	p     *peer
+	p     *Peer
 	txids []common.Hash
 }
 
 // syncTransactions starts sending all currently pending transactions to the given peer.
-func (h *handler) syncTransactions(p *peer, txids []common.Hash) {
+func (h *handler) syncTransactions(p *Peer, txids []common.Hash) {
 	if len(txids) == 0 {
 		return
 	}

@@ -46,25 +46,25 @@ type broadcastItem struct {
 	Raw  rlp.RawValue
 }
 
-type peer struct {
-	id string
+type Peer struct {
+	Id string
 
 	cfg PeerCacheConfig
 
 	*p2p.Peer
-	rw p2p.MsgReadWriter
+	RW p2p.MsgReadWriter
 
 	version uint // Protocol version negotiated
 
 	knownTxs            mapset.Set         // Set of transaction hashes known to be known by this peer
 	knownEvents         mapset.Set         // Set of event hashes known to be known by this peer
-	queue               chan broadcastItem // queue of items to send
+	Queue               chan broadcastItem // queue of items to send
 	queuedDataSemaphore *datasemaphore.DataSemaphore
 	term                chan struct{} // Termination channel to stop the broadcaster
 
 	progress PeerProgress
 
-	snapExt  *snapPeer     // Satellite `snap` connection
+	SnapExt  *snapPeer     // Satellite `snap` connection
 	syncDrop *time.Timer   // Connection dropper if `eth` sync progress isn't validated in time
 	snapWait chan struct{} // Notification channel for snap connections
 
@@ -73,22 +73,22 @@ type peer struct {
 	sync.RWMutex
 }
 
-func (p *peer) Useless() bool {
+func (p *Peer) Useless() bool {
 	return atomic.LoadUint32(&p.useless) != 0
 }
 
-func (p *peer) SetUseless() {
+func (p *Peer) SetUseless() {
 	atomic.StoreUint32(&p.useless, 1)
 }
 
-func (p *peer) SetProgress(x PeerProgress) {
+func (p *Peer) SetProgress(x PeerProgress) {
 	p.Lock()
 	defer p.Unlock()
 
 	p.progress = x
 }
 
-func (p *peer) InterestedIn(h hash.Event) bool {
+func (p *Peer) InterestedIn(h hash.Event) bool {
 	e := h.Epoch()
 
 	p.RLock()
@@ -107,21 +107,21 @@ func (a *PeerProgress) Less(b PeerProgress) bool {
 	return a.LastBlockIdx < b.LastBlockIdx
 }
 
-func newPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, cfg PeerCacheConfig) *peer {
-	peer := &peer{
+func NewPeer(version uint, p *p2p.Peer, RW p2p.MsgReadWriter, cfg PeerCacheConfig) *Peer {
+	peer := &Peer{
 		cfg:                 cfg,
 		Peer:                p,
-		rw:                  rw,
+		RW:                  RW,
 		version:             version,
-		id:                  p.ID().String(),
+		Id:                  p.ID().String(),
 		knownTxs:            mapset.NewSet(),
 		knownEvents:         mapset.NewSet(),
-		queue:               make(chan broadcastItem, cfg.MaxQueuedItems),
+		Queue:               make(chan broadcastItem, cfg.MaxQueuedItems),
 		queuedDataSemaphore: datasemaphore.New(dag.Metric{cfg.MaxQueuedItems, cfg.MaxQueuedSize}, getSemaphoreWarningFn("Peers queue")),
 		term:                make(chan struct{}),
 	}
 
-	go peer.broadcast(peer.queue)
+	go peer.broadcast(peer.Queue)
 
 	return peer
 }
@@ -129,11 +129,11 @@ func newPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, cfg PeerCacheConfi
 // broadcast is a write loop that multiplexes event propagations, announcements
 // and transaction broadcasts into the remote peer. The goal is to have an async
 // writer that does not lock up node internals.
-func (p *peer) broadcast(queue chan broadcastItem) {
+func (p *Peer) broadcast(queue chan broadcastItem) {
 	for {
 		select {
 		case item := <-queue:
-			_ = p2p.Send(p.rw, item.Code, item.Raw)
+			_ = p2p.Send(p.RW, item.Code, item.Raw)
 			p.queuedDataSemaphore.Release(memSize(item.Raw))
 
 		case <-p.term:
@@ -143,13 +143,13 @@ func (p *peer) broadcast(queue chan broadcastItem) {
 }
 
 // Close signals the broadcast goroutine to terminate.
-func (p *peer) Close() {
+func (p *Peer) Close() {
 	p.queuedDataSemaphore.Terminate()
 	close(p.term)
 }
 
 // Info gathers and returns a collection of metadata known about a peer.
-func (p *peer) Info() *PeerInfo {
+func (p *Peer) Info() *PeerInfo {
 	return &PeerInfo{
 		Version:     p.version,
 		Epoch:       p.progress.Epoch,
@@ -159,7 +159,7 @@ func (p *peer) Info() *PeerInfo {
 
 // MarkEvent marks a event as known for the peer, ensuring that the event will
 // never be propagated to this particular peer.
-func (p *peer) MarkEvent(hash hash.Event) {
+func (p *Peer) MarkEvent(hash hash.Event) {
 	// If we reached the memory allowance, drop a previously known event hash
 	for p.knownEvents.Cardinality() >= p.cfg.MaxKnownEvents {
 		p.knownEvents.Pop()
@@ -169,7 +169,7 @@ func (p *peer) MarkEvent(hash hash.Event) {
 
 // MarkTransaction marks a transaction as known for the peer, ensuring that it
 // will never be propagated to this particular peer.
-func (p *peer) MarkTransaction(hash common.Hash) {
+func (p *Peer) MarkTransaction(hash common.Hash) {
 	// If we reached the memory allowance, drop a previously known transaction hash
 	for p.knownTxs.Cardinality() >= p.cfg.MaxKnownTxs {
 		p.knownTxs.Pop()
@@ -179,7 +179,7 @@ func (p *peer) MarkTransaction(hash common.Hash) {
 
 // SendTransactions sends transactions to the peer and includes the hashes
 // in its transaction hash set for future reference.
-func (p *peer) SendTransactions(txs types.Transactions) error {
+func (p *Peer) SendTransactions(txs types.Transactions) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
 	for _, tx := range txs {
 		p.knownTxs.Add(tx.Hash())
@@ -187,12 +187,12 @@ func (p *peer) SendTransactions(txs types.Transactions) error {
 	for p.knownTxs.Cardinality() >= p.cfg.MaxKnownTxs {
 		p.knownTxs.Pop()
 	}
-	return p2p.Send(p.rw, EvmTxsMsg, txs)
+	return p2p.Send(p.RW, EvmTxsMsg, txs)
 }
 
 // SendTransactionHashes sends transaction hashess to the peer and includes the hashes
 // in its transaction hash set for future reference.
-func (p *peer) SendTransactionHashes(txids []common.Hash) error {
+func (p *Peer) SendTransactionHashes(txids []common.Hash) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
 	for _, txid := range txids {
 		p.knownTxs.Add(txid)
@@ -200,14 +200,14 @@ func (p *peer) SendTransactionHashes(txids []common.Hash) error {
 	for p.knownTxs.Cardinality() >= p.cfg.MaxKnownTxs {
 		p.knownTxs.Pop()
 	}
-	return p2p.Send(p.rw, NewEvmTxHashesMsg, txids)
+	return p2p.Send(p.RW, NewEvmTxHashesMsg, txids)
 }
 
 func memSize(v rlp.RawValue) dag.Metric {
 	return dag.Metric{1, uint64(len(v) + 1024)}
 }
 
-func (p *peer) asyncSendEncodedItem(raw rlp.RawValue, code uint64, queue chan broadcastItem) bool {
+func (p *Peer) asyncSendEncodedItem(raw rlp.RawValue, code uint64, queue chan broadcastItem) bool {
 	if !p.queuedDataSemaphore.TryAcquire(memSize(raw)) {
 		return false
 	}
@@ -225,7 +225,7 @@ func (p *peer) asyncSendEncodedItem(raw rlp.RawValue, code uint64, queue chan br
 	return false
 }
 
-func (p *peer) asyncSendNonEncodedItem(value interface{}, code uint64, queue chan broadcastItem) bool {
+func (p *Peer) asyncSendNonEncodedItem(value interface{}, code uint64, queue chan broadcastItem) bool {
 	raw, err := rlp.EncodeToBytes(value)
 	if err != nil {
 		return false
@@ -233,7 +233,7 @@ func (p *peer) asyncSendNonEncodedItem(value interface{}, code uint64, queue cha
 	return p.asyncSendEncodedItem(raw, code, queue)
 }
 
-func (p *peer) enqueueSendEncodedItem(raw rlp.RawValue, code uint64, queue chan broadcastItem) {
+func (p *Peer) enqueueSendEncodedItem(raw rlp.RawValue, code uint64, queue chan broadcastItem) {
 	if !p.queuedDataSemaphore.Acquire(memSize(raw), 10*time.Second) {
 		return
 	}
@@ -249,7 +249,7 @@ func (p *peer) enqueueSendEncodedItem(raw rlp.RawValue, code uint64, queue chan 
 	p.queuedDataSemaphore.Release(memSize(raw))
 }
 
-func (p *peer) enqueueSendNonEncodedItem(value interface{}, code uint64, queue chan broadcastItem) {
+func (p *Peer) enqueueSendNonEncodedItem(value interface{}, code uint64, queue chan broadcastItem) {
 	raw, err := rlp.EncodeToBytes(value)
 	if err != nil {
 		return
@@ -276,7 +276,7 @@ func SplitTransactions(txs types.Transactions, fn func(types.Transactions)) {
 
 // AsyncSendTransactions queues list of transactions propagation to a remote
 // peer. If the peer's broadcast queue is full, the transactions are silently dropped.
-func (p *peer) AsyncSendTransactions(txs types.Transactions, queue chan broadcastItem) {
+func (p *Peer) AsyncSendTransactions(txs types.Transactions, queue chan broadcastItem) {
 	if p.asyncSendNonEncodedItem(txs, EvmTxsMsg, queue) {
 		// Mark all the transactions as known, but ensure we don't overflow our limits
 		for _, tx := range txs {
@@ -292,7 +292,7 @@ func (p *peer) AsyncSendTransactions(txs types.Transactions, queue chan broadcas
 
 // AsyncSendTransactionHashes queues list of transactions propagation to a remote
 // peer. If the peer's broadcast queue is full, the transactions are silently dropped.
-func (p *peer) AsyncSendTransactionHashes(txids []common.Hash, queue chan broadcastItem) {
+func (p *Peer) AsyncSendTransactionHashes(txids []common.Hash, queue chan broadcastItem) {
 	if p.asyncSendNonEncodedItem(txids, NewEvmTxHashesMsg, queue) {
 		// Mark all the transactions as known, but ensure we don't overflow our limits
 		for _, tx := range txids {
@@ -309,7 +309,7 @@ func (p *peer) AsyncSendTransactionHashes(txids []common.Hash, queue chan broadc
 // EnqueueSendTransactions queues list of transactions propagation to a remote
 // peer.
 // The method is blocking in a case if the peer's broadcast queue is full.
-func (p *peer) EnqueueSendTransactions(txs types.Transactions, queue chan broadcastItem) {
+func (p *Peer) EnqueueSendTransactions(txs types.Transactions, queue chan broadcastItem) {
 	p.enqueueSendNonEncodedItem(txs, EvmTxsMsg, queue)
 	// Mark all the transactions as known, but ensure we don't overflow our limits
 	for _, tx := range txs {
@@ -322,7 +322,7 @@ func (p *peer) EnqueueSendTransactions(txs types.Transactions, queue chan broadc
 
 // SendEventIDs announces the availability of a number of events through
 // a hash notification.
-func (p *peer) SendEventIDs(hashes []hash.Event) error {
+func (p *Peer) SendEventIDs(hashes []hash.Event) error {
 	// Mark all the event hashes as known, but ensure we don't overflow our limits
 	for _, hash := range hashes {
 		p.knownEvents.Add(hash)
@@ -330,13 +330,13 @@ func (p *peer) SendEventIDs(hashes []hash.Event) error {
 	for p.knownEvents.Cardinality() >= p.cfg.MaxKnownEvents {
 		p.knownEvents.Pop()
 	}
-	return p2p.Send(p.rw, NewEventIDsMsg, hashes)
+	return p2p.Send(p.RW, NewEventIDsMsg, hashes)
 }
 
 // AsyncSendEventIDs queues the availability of a event for propagation to a
 // remote peer. If the peer's broadcast queue is full, the event is silently
 // dropped.
-func (p *peer) AsyncSendEventIDs(ids hash.Events, queue chan broadcastItem) {
+func (p *Peer) AsyncSendEventIDs(ids hash.Events, queue chan broadcastItem) {
 	if p.asyncSendNonEncodedItem(ids, NewEventIDsMsg, queue) {
 		// Mark all the event hash as known, but ensure we don't overflow our limits
 		for _, id := range ids {
@@ -351,7 +351,7 @@ func (p *peer) AsyncSendEventIDs(ids hash.Events, queue chan broadcastItem) {
 }
 
 // SendEvents propagates a batch of events to a remote peer.
-func (p *peer) SendEvents(events inter.EventPayloads) error {
+func (p *Peer) SendEvents(events inter.EventPayloads) error {
 	// Mark all the event hash as known, but ensure we don't overflow our limits
 	for _, event := range events {
 		p.knownEvents.Add(event.ID())
@@ -359,11 +359,11 @@ func (p *peer) SendEvents(events inter.EventPayloads) error {
 			p.knownEvents.Pop()
 		}
 	}
-	return p2p.Send(p.rw, EventsMsg, events)
+	return p2p.Send(p.RW, EventsMsg, events)
 }
 
 // SendEventsRLP propagates a batch of RLP events to a remote peer.
-func (p *peer) SendEventsRLP(events []rlp.RawValue, ids []hash.Event) error {
+func (p *Peer) SendEventsRLP(events []rlp.RawValue, ids []hash.Event) error {
 	// Mark all the event hash as known, but ensure we don't overflow our limits
 	for _, id := range ids {
 		p.knownEvents.Add(id)
@@ -371,12 +371,12 @@ func (p *peer) SendEventsRLP(events []rlp.RawValue, ids []hash.Event) error {
 			p.knownEvents.Pop()
 		}
 	}
-	return p2p.Send(p.rw, EventsMsg, events)
+	return p2p.Send(p.RW, EventsMsg, events)
 }
 
 // AsyncSendEvents queues an entire event for propagation to a remote peer.
 // If the peer's broadcast queue is full, the events are silently dropped.
-func (p *peer) AsyncSendEvents(events inter.EventPayloads, queue chan broadcastItem) bool {
+func (p *Peer) AsyncSendEvents(events inter.EventPayloads, queue chan broadcastItem) bool {
 	if p.asyncSendNonEncodedItem(events, EventsMsg, queue) {
 		// Mark all the event hash as known, but ensure we don't overflow our limits
 		for _, event := range events {
@@ -393,7 +393,7 @@ func (p *peer) AsyncSendEvents(events inter.EventPayloads, queue chan broadcastI
 
 // EnqueueSendEventsRLP queues an entire RLP event for propagation to a remote peer.
 // The method is blocking in a case if the peer's broadcast queue is full.
-func (p *peer) EnqueueSendEventsRLP(events []rlp.RawValue, ids []hash.Event, queue chan broadcastItem) {
+func (p *Peer) EnqueueSendEventsRLP(events []rlp.RawValue, ids []hash.Event, queue chan broadcastItem) {
 	p.enqueueSendNonEncodedItem(events, EventsMsg, queue)
 	// Mark all the event hash as known, but ensure we don't overflow our limits
 	for _, id := range ids {
@@ -406,13 +406,13 @@ func (p *peer) EnqueueSendEventsRLP(events []rlp.RawValue, ids []hash.Event, que
 
 // AsyncSendProgress queues a progress propagation to a remote peer.
 // If the peer's broadcast queue is full, the progress is silently dropped.
-func (p *peer) AsyncSendProgress(progress PeerProgress, queue chan broadcastItem) {
+func (p *Peer) AsyncSendProgress(progress PeerProgress, queue chan broadcastItem) {
 	if !p.asyncSendNonEncodedItem(progress, ProgressMsg, queue) {
 		p.Log().Debug("Dropping peer progress propagation")
 	}
 }
 
-func (p *peer) RequestEvents(ids hash.Events) error {
+func (p *Peer) RequestEvents(ids hash.Events) error {
 	// divide big batch into smaller ones
 	for start := 0; start < len(ids); start += softLimitItems {
 		end := len(ids)
@@ -420,7 +420,7 @@ func (p *peer) RequestEvents(ids hash.Events) error {
 			end = start + softLimitItems
 		}
 		p.Log().Debug("Fetching batch of events", "count", len(ids[start:end]))
-		err := p2p.Send(p.rw, GetEventsMsg, ids[start:end])
+		err := p2p.Send(p.RW, GetEventsMsg, ids[start:end])
 		if err != nil {
 			return err
 		}
@@ -428,7 +428,7 @@ func (p *peer) RequestEvents(ids hash.Events) error {
 	return nil
 }
 
-func (p *peer) RequestTransactions(txids []common.Hash) error {
+func (p *Peer) RequestTransactions(txids []common.Hash) error {
 	// divide big batch into smaller ones
 	for start := 0; start < len(txids); start += softLimitItems {
 		end := len(txids)
@@ -436,7 +436,7 @@ func (p *peer) RequestTransactions(txids []common.Hash) error {
 			end = start + softLimitItems
 		}
 		p.Log().Debug("Fetching batch of transactions", "count", len(txids[start:end]))
-		err := p2p.Send(p.rw, GetEvmTxsMsg, txids[start:end])
+		err := p2p.Send(p.RW, GetEvmTxsMsg, txids[start:end])
 		if err != nil {
 			return err
 		}
@@ -444,31 +444,31 @@ func (p *peer) RequestTransactions(txids []common.Hash) error {
 	return nil
 }
 
-func (p *peer) SendBVsStream(r bvstream.Response) error {
-	return p2p.Send(p.rw, BVsStreamResponse, r)
+func (p *Peer) SendBVsStream(r bvstream.Response) error {
+	return p2p.Send(p.RW, BVsStreamResponse, r)
 }
 
-func (p *peer) RequestBVsStream(r bvstream.Request) error {
-	return p2p.Send(p.rw, RequestBVsStream, r)
+func (p *Peer) RequestBVsStream(r bvstream.Request) error {
+	return p2p.Send(p.RW, RequestBVsStream, r)
 }
 
-func (p *peer) SendBRsStream(r brstream.Response) error {
-	return p2p.Send(p.rw, BRsStreamResponse, r)
+func (p *Peer) SendBRsStream(r brstream.Response) error {
+	return p2p.Send(p.RW, BRsStreamResponse, r)
 }
 
-func (p *peer) RequestBRsStream(r brstream.Request) error {
-	return p2p.Send(p.rw, RequestBRsStream, r)
+func (p *Peer) RequestBRsStream(r brstream.Request) error {
+	return p2p.Send(p.RW, RequestBRsStream, r)
 }
 
-func (p *peer) SendEPsStream(r epstream.Response) error {
-	return p2p.Send(p.rw, EPsStreamResponse, r)
+func (p *Peer) SendEPsStream(r epstream.Response) error {
+	return p2p.Send(p.RW, EPsStreamResponse, r)
 }
 
-func (p *peer) RequestEPsStream(r epstream.Request) error {
-	return p2p.Send(p.rw, RequestEPsStream, r)
+func (p *Peer) RequestEPsStream(r epstream.Request) error {
+	return p2p.Send(p.RW, RequestEPsStream, r)
 }
 
-func (p *peer) SendEventsStream(r dagstream.Response, ids hash.Events) error {
+func (p *Peer) SendEventsStream(r dagstream.Response, ids hash.Events) error {
 	// Mark all the event hash as known, but ensure we don't overflow our limits
 	for _, id := range ids {
 		p.knownEvents.Add(id)
@@ -476,23 +476,23 @@ func (p *peer) SendEventsStream(r dagstream.Response, ids hash.Events) error {
 			p.knownEvents.Pop()
 		}
 	}
-	return p2p.Send(p.rw, EventsStreamResponse, r)
+	return p2p.Send(p.RW, EventsStreamResponse, r)
 }
 
-func (p *peer) RequestEventsStream(r dagstream.Request) error {
-	return p2p.Send(p.rw, RequestEventsStream, r)
+func (p *Peer) RequestEventsStream(r dagstream.Request) error {
+	return p2p.Send(p.RW, RequestEventsStream, r)
 }
 
 // Handshake executes the protocol handshake, negotiating version number,
 // network IDs, difficulties, head and genesis object.
-func (p *peer) Handshake(network uint64, progress PeerProgress, genesis common.Hash) error {
+func (p *Peer) Handshake(network uint64, progress PeerProgress, genesis common.Hash) error {
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 	var handshake handshakeData // safe to read after two values have been received from errc
 
 	go func() {
 		// send both HandshakeMsg and ProgressMsg
-		err := p2p.Send(p.rw, HandshakeMsg, &handshakeData{
+		err := p2p.Send(p.RW, HandshakeMsg, &handshakeData{
 			ProtocolVersion: uint32(p.version),
 			NetworkID:       0, // TODO: set to `network` after all nodes updated to #184
 			Genesis:         genesis,
@@ -521,20 +521,20 @@ func (p *peer) Handshake(network uint64, progress PeerProgress, genesis common.H
 	return nil
 }
 
-func (p *peer) SendProgress(progress PeerProgress) error {
-	return p2p.Send(p.rw, ProgressMsg, progress)
+func (p *Peer) SendProgress(progress PeerProgress) error {
+	return p2p.Send(p.RW, ProgressMsg, progress)
 }
 
-func (p *peer) readStatus(network uint64, handshake *handshakeData, genesis common.Hash) (err error) {
-	msg, err := p.rw.ReadMsg()
+func (p *Peer) readStatus(network uint64, handshake *handshakeData, genesis common.Hash) (err error) {
+	msg, err := p.RW.ReadMsg()
 	if err != nil {
 		return err
 	}
 	if msg.Code != HandshakeMsg {
 		return errResp(ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, HandshakeMsg)
 	}
-	if msg.Size > protocolMaxMsgSize {
-		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, protocolMaxMsgSize)
+	if msg.Size > ProtocolMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, ProtocolMaxMsgSize)
 	}
 	// Decode the handshake and make sure everything matches
 	if err := msg.Decode(&handshake); err != nil {
@@ -559,8 +559,8 @@ func (p *peer) readStatus(network uint64, handshake *handshakeData, genesis comm
 }
 
 // String implements fmt.Stringer.
-func (p *peer) String() string {
-	return fmt.Sprintf("Peer %s [%s]", p.id,
+func (p *Peer) String() string {
+	return fmt.Sprintf("Peer %s [%s]", p.Id,
 		fmt.Sprintf("opera/%2d", p.version),
 	)
 }

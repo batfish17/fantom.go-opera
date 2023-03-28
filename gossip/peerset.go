@@ -46,8 +46,8 @@ var (
 
 // peerSet represents the collection of active peers currently participating in
 // the `eth` protocol, with or without the `snap` extension.
-type peerSet struct {
-	peers     map[string]*peer // Peers connected on the `eth` protocol
+type PeerSet struct {
+	peers     map[string]*Peer // Peers connected on the `eth` protocol
 	snapPeers int              // Number of `snap` compatible peers for connection prioritization
 
 	snapWait map[string]chan *snap.Peer // Peers connected on `eth` waiting for their snap extension
@@ -58,9 +58,9 @@ type peerSet struct {
 }
 
 // newPeerSet creates a new peer set to track the active participants.
-func newPeerSet() *peerSet {
-	return &peerSet{
-		peers:    make(map[string]*peer),
+func NewPeerSet() *PeerSet {
+	return &PeerSet{
+		peers:    make(map[string]*Peer),
 		snapWait: make(map[string]chan *snap.Peer),
 		snapPend: make(map[string]*snap.Peer),
 	}
@@ -69,7 +69,7 @@ func newPeerSet() *peerSet {
 // RegisterSnapExtension unblocks an already connected `eth` peer waiting for its
 // `snap` extension, or if no such peer exists, tracks the extension for the time
 // being until the `eth` main protocol starts looking for it.
-func (ps *peerSet) RegisterSnapExtension(peer *snap.Peer) error {
+func (ps *PeerSet) RegisterSnapExtension(peer *snap.Peer) error {
 	// Reject the peer if it is not eligible for a snap protocol
 	if !eligibleForSnap(peer.Peer) {
 		return errSnapWithoutOpera
@@ -97,7 +97,7 @@ func (ps *peerSet) RegisterSnapExtension(peer *snap.Peer) error {
 
 // WaitSnapExtension blocks until all satellite protocols are connected and tracked
 // by the peerset.
-func (ps *peerSet) WaitSnapExtension(p *peer) (*snap.Peer, error) {
+func (ps *PeerSet) WaitSnapExtension(p *Peer) (*snap.Peer, error) {
 	// If the peer is not eligible for a snap protocol`, don't wait
 	if !eligibleForSnap(p.Peer) {
 		return nil, nil
@@ -105,7 +105,7 @@ func (ps *peerSet) WaitSnapExtension(p *peer) (*snap.Peer, error) {
 	// Ensure nobody can double connect
 	ps.lock.Lock()
 
-	id := p.id
+	id := p.Id
 	if _, ok := ps.peers[id]; ok {
 		ps.lock.Unlock()
 		return nil, errPeerAlreadyRegistered // avoid connections with the same id as existing ones
@@ -131,7 +131,7 @@ func (ps *peerSet) WaitSnapExtension(p *peer) (*snap.Peer, error) {
 
 // RegisterPeer injects a new `eth` peer into the working set, or returns an error
 // if the peer is already known.
-func (ps *peerSet) RegisterPeer(p *peer, ext *snap.Peer) error {
+func (ps *PeerSet) RegisterPeer(p *Peer, ext *snap.Peer) error {
 	// Start tracking the new peer
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -140,13 +140,13 @@ func (ps *peerSet) RegisterPeer(p *peer, ext *snap.Peer) error {
 		return errPeerSetClosed
 	}
 
-	id := p.id
+	id := p.Id
 	if _, ok := ps.peers[id]; ok {
 		return errPeerAlreadyRegistered
 	}
 
 	if ext != nil {
-		p.snapExt = &snapPeer{ext}
+		p.SnapExt = &snapPeer{ext}
 		ps.snapPeers++
 	}
 
@@ -156,7 +156,7 @@ func (ps *peerSet) RegisterPeer(p *peer, ext *snap.Peer) error {
 
 // UnregisterPeer removes a remote peer from the active set, disabling any further
 // actions to/from that particular entity.
-func (ps *peerSet) UnregisterPeer(id string) error {
+func (ps *PeerSet) UnregisterPeer(id string) error {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
@@ -165,21 +165,21 @@ func (ps *peerSet) UnregisterPeer(id string) error {
 		return errPeerNotRegistered
 	}
 	delete(ps.peers, id)
-	if peer.snapExt != nil {
+	if peer.SnapExt != nil {
 		ps.snapPeers--
 	}
 	return nil
 }
 
 // Peer retrieves the registered peer with the given id.
-func (ps *peerSet) Peer(id string) *peer {
+func (ps *PeerSet) Peer(id string) *Peer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
 	return ps.peers[id]
 }
 
-func (ps *peerSet) UselessNum() int {
+func (ps *PeerSet) UselessNum() int {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
@@ -194,11 +194,11 @@ func (ps *peerSet) UselessNum() int {
 
 // PeersWithoutEvent retrieves a list of peers that do not have a given event in
 // their set of known hashes so it might be propagated to them.
-func (ps *peerSet) PeersWithoutEvent(e hash.Event) []*peer {
+func (ps *PeerSet) PeersWithoutEvent(e hash.Event) []*Peer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
-	list := make([]*peer, 0, len(ps.peers))
+	list := make([]*Peer, 0, len(ps.peers))
 	for _, p := range ps.peers {
 		if p.InterestedIn(e) {
 			list = append(list, p)
@@ -209,11 +209,11 @@ func (ps *peerSet) PeersWithoutEvent(e hash.Event) []*peer {
 
 // PeersWithoutTx retrieves a list of peers that do not have a given
 // transaction in their set of known hashes.
-func (ps *peerSet) PeersWithoutTx(hash common.Hash) []*peer {
+func (ps *PeerSet) PeersWithoutTx(hash common.Hash) []*Peer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
-	list := make([]*peer, 0, len(ps.peers))
+	list := make([]*Peer, 0, len(ps.peers))
 	for _, p := range ps.peers {
 		if !p.knownTxs.Contains(hash) {
 			list = append(list, p)
@@ -223,11 +223,11 @@ func (ps *peerSet) PeersWithoutTx(hash common.Hash) []*peer {
 }
 
 // List returns array of peers in the set.
-func (ps *peerSet) List() []*peer {
+func (ps *PeerSet) List() []*Peer {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
-	list := make([]*peer, 0, len(ps.peers))
+	list := make([]*Peer, 0, len(ps.peers))
 	for _, p := range ps.peers {
 		list = append(list, p)
 	}
@@ -237,7 +237,7 @@ func (ps *peerSet) List() []*peer {
 // Len returns if the current number of `eth` peers in the set. Since the `snap`
 // peers are tied to the existence of an `eth` connection, that will always be a
 // subset of `eth`.
-func (ps *peerSet) Len() int {
+func (ps *PeerSet) Len() int {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
@@ -245,7 +245,7 @@ func (ps *peerSet) Len() int {
 }
 
 // SnapLen returns if the current number of `snap` peers in the set.
-func (ps *peerSet) SnapLen() int {
+func (ps *PeerSet) SnapLen() int {
 	ps.lock.RLock()
 	defer ps.lock.RUnlock()
 
@@ -253,7 +253,7 @@ func (ps *peerSet) SnapLen() int {
 }
 
 // Close disconnects all peers.
-func (ps *peerSet) Close() {
+func (ps *PeerSet) Close() {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
